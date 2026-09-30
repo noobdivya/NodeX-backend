@@ -1,3 +1,6 @@
+// Command server runs NodeX's email verifier. It is the only server-side
+// piece of NodeX and holds no user data: identities, contacts, chat and
+// profiles live on users' devices and travel peer to peer.
 package main
 
 import (
@@ -10,11 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nodex/nodex-backend/internal/auth"
 	"github.com/nodex/nodex-backend/internal/config"
-	"github.com/nodex/nodex-backend/internal/db"
 	"github.com/nodex/nodex-backend/internal/httpx"
 	"github.com/nodex/nodex-backend/internal/mailer"
+	"github.com/nodex/nodex-backend/internal/otp"
 )
 
 func main() {
@@ -26,29 +28,30 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
-	if err != nil {
-		log.Fatalf("database: %v", err)
-	}
-	defer pool.Close()
-
-	if err := db.Migrate(ctx, pool); err != nil {
-		log.Fatalf("migrate: %v", err)
-	}
-
 	if !cfg.SMTP.Enabled() {
 		log.Println("SMTP_HOST not set: OTP codes will be printed to this log (development only)")
 	}
 
-	svc := auth.NewService(pool, mailer.New(cfg.SMTP), cfg.OTPSecret)
-	go purgeLoop(ctx, svc)
+	svc := otp.NewService(cfg.OTPSecret, mailer.New(cfg.SMTP))
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				svc.Purge()
+			}
+		}
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	limiter := httpx.NewIPRateLimiter(cfg.RateLimitPerMinute, max(cfg.RateLimitPerMinute/2, 1))
-	auth.NewHandlers(svc).Routes(mux, limiter.Middleware)
+	otp.NewHandlers(svc).Routes(mux, limiter.Middleware)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -60,7 +63,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("NodeX backend listening on :%s (%s)", cfg.Port, cfg.Env)
+		log.Printf("NodeX email verifier listening on :%s (%s)", cfg.Port, cfg.Env)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server: %v", err)
 		}
@@ -70,19 +73,4 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(shutdownCtx)
-}
-
-func purgeLoop(ctx context.Context, svc *auth.Service) {
-	t := time.NewTicker(10 * time.Minute)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if err := svc.PurgeExpired(ctx); err != nil {
-				log.Printf("purge expired: %v", err)
-			}
-		}
-	}
 }

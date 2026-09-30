@@ -13,11 +13,10 @@ import (
 type Config struct {
 	Env         string
 	Port        string
-	DatabaseURL string
 	CORSOrigins []string
 	OTPSecret   []byte
 	SMTP        SMTPConfig
-	// Per-IP limit for the OTP and registration endpoints.
+	// Per-IP limit for the OTP endpoints.
 	RateLimitPerMinute int
 }
 
@@ -39,9 +38,8 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Env:         getenv("APP_ENV", "development"),
-		Port:        getenv("PORT", "8080"),
-		DatabaseURL: getenv("DATABASE_URL", "postgres://nodex:nodex@localhost:5433/nodex?sslmode=disable"),
+		Env:  getenv("APP_ENV", "development"),
+		Port: getenv("PORT", "8080"),
 		SMTP: SMTPConfig{
 			Host:     os.Getenv("SMTP_HOST"),
 			Username: os.Getenv("SMTP_USERNAME"),
