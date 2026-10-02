@@ -29,6 +29,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 )
@@ -50,7 +51,13 @@ func main() {
 		libp2p.ListenAddrStrings(listen...),
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Transport(websocket.New),
-		libp2p.EnableRelayService(),
+		// Relayed connections are a fallback when two browsers can't connect
+		// directly. The default limit (128 KB, 2 min) is too small for photo
+		// messages, so allow more. The relay only ever sees encrypted bytes.
+		libp2p.EnableRelayService(relay.WithLimit(&relay.RelayLimit{
+			Duration: 10 * time.Minute,
+			Data:     16 << 20,
+		})),
 		libp2p.ForceReachabilityPublic(),
 	)
 	if err != nil {
