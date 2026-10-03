@@ -90,8 +90,10 @@ Errors look like `{ "error": { "code": "otp_invalid", "message": "…" } }`.
 | `CORS_ORIGINS` | `http://localhost:3000` | Allowed frontend origins (comma-separated) |
 | `RATE_LIMIT_PER_MINUTE` | `20` | Requests per minute per IP |
 | `OTP_SECRET` | random per run | HMAC key for code tokens, at least 32 characters. **Required in production.** |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | – | Email sending. **Required in production.** |
-| `APP_ENV` | `development` | `production` enforces the required settings |
+| `SMTP_FROM` | `NodeX <no-reply@nodex.local>` | Sender shown in the email |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | – | Send through the **Gmail API over HTTPS** (used when all three are set). Works where SMTP ports are blocked. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` | – | Send through SMTP instead |
+| `APP_ENV` | `development` | `production` enforces the required settings (`OTP_SECRET`, and Gmail API or SMTP) |
 | `TRUST_PROXY` | – | `true` behind a hosting proxy (e.g. Render), so rate limiting uses the visitor's address from `X-Forwarded-For` |
 
 ---
@@ -122,13 +124,29 @@ cp .env.example .env
 go run ./cmd/server
 ```
 
-It listens on **http://localhost:8080**. If `SMTP_HOST` is empty, codes are printed in this terminal instead of being emailed, so no email setup is needed for local testing.
+It listens on **http://localhost:8080**. With no Gmail or SMTP settings, codes are printed in this terminal instead of being emailed, so no email setup is needed for local testing.
 
-### Sending real emails with Gmail
+### Sending real emails: Gmail API (recommended)
 
-1. Turn on [2-Step Verification](https://myaccount.google.com/security) for the Gmail account.
-2. Create an **App Password** at <https://myaccount.google.com/apppasswords>.
-3. Fill in `email-verifier/.env`:
+Sends from your Gmail account over HTTPS, so it also works on hosts that block mail ports (like Render's free plan). The permission granted is **send email only**: it can't read or change the mailbox.
+
+1. **Create a Google Cloud project** at <https://console.cloud.google.com/projectcreate> (any name, e.g. `NodeX`).
+2. **Enable the Gmail API:** <https://console.cloud.google.com/apis/library/gmail.googleapis.com> → **Enable**.
+3. **Set up the consent screen:** Google Auth Platform → **Branding** (app name `NodeX`, your email), **Audience** → *External*, then **Publish app** so it's *In production*. A login for an app left in *Testing* stops working after 7 days. You don't need Google's verification for your own account.
+4. **Create the client:** **Clients** → **Create client** → type **Desktop app**. Copy its **Client ID** and **Client secret**.
+5. **Connect your Gmail** (on your own computer):
+   ```bash
+   cd email-verifier
+   go run ./cmd/gmail-auth
+   ```
+   Paste the client ID and secret, sign in with the Gmail account to send from, and allow **Send email on your behalf**. Google warns that the app isn't verified because it's your own: choose **Advanced → Go to NodeX**. The helper prints `GMAIL_REFRESH_TOKEN`.
+6. Put `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` and `SMTP_FROM=NodeX <you@gmail.com>` in `.env` (locally) or the host's environment settings.
+
+If sending later fails with `invalid_grant`, the login was revoked (for example after changing your Google password): run `gmail-auth` again and update `GMAIL_REFRESH_TOKEN`.
+
+### Sending real emails: SMTP
+
+Works locally and on hosts that allow mail ports. For Gmail, turn on [2-Step Verification](https://myaccount.google.com/security), create an **App Password** at <https://myaccount.google.com/apppasswords>, and set:
 
 ```env
 SMTP_HOST=smtp.gmail.com
@@ -138,7 +156,7 @@ SMTP_PASSWORD=your-16-character-app-password
 SMTP_FROM=NodeX <you@gmail.com>
 ```
 
-**Never commit `.env` or `node.key`**; both are git-ignored.
+**Never commit `.env` or `node.key`**; both are git-ignored. Treat `GMAIL_REFRESH_TOKEN` like a password.
 
 ---
 
@@ -147,7 +165,7 @@ SMTP_FROM=NodeX <you@gmail.com>
 [`render.yaml`](render.yaml) is a Render Blueprint for both services (Docker builds).
 
 1. **Render → New → Blueprint**, pick this repository. It creates `nodex-node` and `nodex-verifier`, generates `NODE_KEY` and `OTP_SECRET`, and asks for:
-   - `SMTP_USERNAME`, `SMTP_PASSWORD` (a Gmail App Password), `SMTP_FROM`
+   - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` (see [Gmail API](#sending-real-emails-gmail-api-recommended)) and `SMTP_FROM`
    - `CORS_ORIGINS`: your Vercel address (use a placeholder until the frontend is deployed)
 2. When both are live, open **nodex-node → Logs** and copy the value after `browsers: NEXT_PUBLIC_BOOTSTRAP_PEERS=`. It looks like `/dns4/nodex-node-xxxx.onrender.com/tcp/443/wss/p2p/12D3KooW…`.
 3. Use it, plus the verifier's `https://…onrender.com` address, when deploying the frontend on Vercel.
@@ -155,7 +173,7 @@ SMTP_FROM=NodeX <you@gmail.com>
 
 Notes:
 - **Free instances sleep after about 15 minutes without traffic.** For the node this means a slow first visit and an empty handle directory until people open the app again. A paid instance keeps it always on.
-- **Email on the free plan:** if codes don't arrive and the verifier's logs show a timeout connecting to the SMTP server, the free plan is blocking outgoing email ports; use a paid instance for the verifier.
+- **Email on the free plan:** Render's free plan blocks outgoing SMTP, which is why the Blueprint uses the Gmail API (HTTPS). If you use SMTP instead, the verifier gives up after 10 seconds and logs `connect to smtp…: i/o timeout`.
 
 ---
 
@@ -182,9 +200,10 @@ p2p-node/
 └── Dockerfile
 email-verifier/
 ├── cmd/server/main.go         Startup and routes
+├── cmd/gmail-auth/            One-time helper: connect a Gmail account (Gmail API)
 ├── internal/
 │   ├── otp/                   Send and verify codes (HMAC-signed tokens)
-│   ├── mailer/                SMTP email sending
+│   ├── mailer/                Email sending: Gmail API or SMTP
 │   ├── httpx/                 JSON helpers, CORS, rate limiting
 │   └── config/                Settings and .env loading
 └── Dockerfile

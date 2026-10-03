@@ -32,7 +32,7 @@ func main() {
 		log.Println("SMTP_HOST not set: OTP codes will be printed to this log (development only)")
 	}
 
-	svc := otp.NewService(cfg.OTPSecret, mailer.New(cfg.SMTP))
+	svc := otp.NewService(cfg.OTPSecret, mailer.New(cfg.SMTP, cfg.Gmail))
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()

@@ -36,14 +36,14 @@ services:
         value: "true"
       - key: OTP_SECRET
         generateValue: true
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: "587"
-      # Asked for when the Blueprint is created:
-      - key: SMTP_USERNAME
+      # Email: Render's free plan blocks SMTP, so codes go out through the
+      # Gmail API over HTTPS. Get the values with `go run ./cmd/gmail-auth`
+      # in email-verifier/ (see README). Asked for when the Blueprint is created:
+      - key: GMAIL_CLIENT_ID
         sync: false
-      - key: SMTP_PASSWORD
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
         sync: false
       - key: SMTP_FROM
         sync: false

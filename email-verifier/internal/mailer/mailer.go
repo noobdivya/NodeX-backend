@@ -18,11 +18,34 @@ type Mailer interface {
 	SendOTP(ctx context.Context, to, code string, ttl time.Duration) error
 }
 
-func New(cfg config.SMTPConfig) Mailer {
-	if !cfg.Enabled() {
+// New picks how codes are sent: the Gmail API if configured, else SMTP,
+// else (for local development) printing them to the log.
+func New(smtpCfg config.SMTPConfig, gmailCfg config.GmailConfig) Mailer {
+	switch {
+	case gmailCfg.Enabled():
+		return newGmailMailer(gmailCfg, smtpCfg.From)
+	case smtpCfg.Enabled():
+		return smtpMailer{cfg: smtpCfg}
+	default:
 		return logMailer{}
 	}
-	return smtpMailer{cfg: cfg}
+}
+
+// otpMessage is the verification email, as an RFC 5322 message.
+func otpMessage(from, to, code string, ttl time.Duration) ([]byte, error) {
+	if strings.ContainsAny(to, "\r\n") || strings.ContainsAny(from, "\r\n") {
+		return nil, fmt.Errorf("invalid address")
+	}
+	body := fmt.Sprintf(
+		"Your NodeX verification code is: %s\r\n\r\nIt expires in %d minutes. If you did not request this, you can ignore this email.\r\n",
+		code, int(ttl.Minutes()),
+	)
+	return []byte("From: " + from + "\r\n" +
+		"To: " + to + "\r\n" +
+		"Subject: Your NodeX verification code\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=UTF-8\r\n" +
+		"\r\n" + body), nil
 }
 
 // logMailer prints codes to stdout so the flow works locally without SMTP.
@@ -45,19 +68,10 @@ const (
 )
 
 func (m smtpMailer) SendOTP(ctx context.Context, to, code string, ttl time.Duration) error {
-	if strings.ContainsAny(to, "\r\n") {
-		return fmt.Errorf("invalid recipient")
+	msg, err := otpMessage(m.cfg.From, to, code, ttl)
+	if err != nil {
+		return err
 	}
-	body := fmt.Sprintf(
-		"Your NodeX verification code is: %s\r\n\r\nIt expires in %d minutes. If you did not request this, you can ignore this email.\r\n",
-		code, int(ttl.Minutes()),
-	)
-	msg := "From: " + m.cfg.From + "\r\n" +
-		"To: " + to + "\r\n" +
-		"Subject: Your NodeX verification code\r\n" +
-		"MIME-Version: 1.0\r\n" +
-		"Content-Type: text/plain; charset=UTF-8\r\n" +
-		"\r\n" + body
 
 	addr := net.JoinHostPort(m.cfg.Host, strconv.Itoa(m.cfg.Port))
 	var auth smtp.Auth
@@ -71,7 +85,6 @@ func (m smtpMailer) SendOTP(ctx context.Context, to, code string, ttl time.Durat
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	var conn net.Conn
-	var err error
 	// Port 465 uses implicit TLS; other ports upgrade with STARTTLS.
 	if m.cfg.Port == 465 {
 		conn, err = (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(dialCtx, "tcp", addr)
@@ -113,7 +126,7 @@ func (m smtpMailer) SendOTP(ctx context.Context, to, code string, ttl time.Durat
 	if err != nil {
 		return err
 	}
-	if _, err := w.Write([]byte(msg)); err != nil {
+	if _, err := w.Write(msg); err != nil {
 		return err
 	}
 	if err := w.Close(); err != nil {
