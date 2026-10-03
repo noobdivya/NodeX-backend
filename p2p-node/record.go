@@ -12,7 +12,7 @@ package main
 //     using the same slow PBKDF2 as the browser — so nobody can publish a
 //     record for a handle that isn't theirs.
 //
-// Must stay byte-for-byte compatible with NodeX-frontend/lib/p2p/record.ts.
+// Must stay byte-for-byte compatible with lib/p2p/record.ts in the NodeX-frontend repository.
 
 import (
 	"bytes"

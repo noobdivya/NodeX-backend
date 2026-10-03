@@ -1,0 +1,52 @@
+# Render Blueprint: the NodeX P2P node and the email verifier.
+# Render dashboard → New → Blueprint → pick this repository.
+# The frontend (NodeX-frontend repository) is deployed on Vercel.
+services:
+  # P2P node: browsers join the network here (WebSockets over Render's HTTPS).
+  # Its address appears in the logs as "browsers: NEXT_PUBLIC_BOOTSTRAP_PEERS=…".
+  - type: web
+    name: nodex-node
+    runtime: docker
+    plan: free
+    dockerfilePath: ./p2p-node/Dockerfile
+    dockerContext: ./p2p-node
+    buildFilter:
+      paths:
+        - p2p-node/**
+    envVars:
+      # Keeps the node's identity (and so its address) the same across deploys.
+      - key: NODE_KEY
+        generateValue: true
+
+  # Email verifier: sends and checks the sign-up email code. Nothing else.
+  - type: web
+    name: nodex-verifier
+    runtime: docker
+    plan: free
+    dockerfilePath: ./email-verifier/Dockerfile
+    dockerContext: ./email-verifier
+    healthCheckPath: /healthz
+    buildFilter:
+      paths:
+        - email-verifier/**
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "true"
+      - key: OTP_SECRET
+        generateValue: true
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      # Asked for when the Blueprint is created:
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # Your Vercel address, e.g. https://nodex.vercel.app (no trailing slash).
+      - key: CORS_ORIGINS
+        sync: false
