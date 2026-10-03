@@ -50,7 +50,7 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	limiter := httpx.NewIPRateLimiter(cfg.RateLimitPerMinute, max(cfg.RateLimitPerMinute/2, 1))
+	limiter := httpx.NewIPRateLimiter(cfg.RateLimitPerMinute, max(cfg.RateLimitPerMinute/2, 1), cfg.TrustProxy)
 	otp.NewHandlers(svc).Routes(mux, limiter.Middleware)
 
 	srv := &http.Server{

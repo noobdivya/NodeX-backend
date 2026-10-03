@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +76,9 @@ type IPRateLimiter struct {
 	clients map[string]*client
 	limit   rate.Limit
 	burst   int
+	// Behind a hosting proxy (e.g. Render) every request arrives from the
+	// proxy, so the visitor's address is taken from X-Forwarded-For instead.
+	trustProxy bool
 }
 
 type client struct {
@@ -82,11 +86,12 @@ type client struct {
 	lastSeen time.Time
 }
 
-func NewIPRateLimiter(perMinute, burst int) *IPRateLimiter {
+func NewIPRateLimiter(perMinute, burst int, trustProxy bool) *IPRateLimiter {
 	l := &IPRateLimiter{
-		clients: make(map[string]*client),
-		limit:   rate.Limit(float64(perMinute) / 60),
-		burst:   burst,
+		clients:    make(map[string]*client),
+		limit:      rate.Limit(float64(perMinute) / 60),
+		burst:      burst,
+		trustProxy: trustProxy,
 	}
 	go l.evictLoop()
 	return l
@@ -94,7 +99,7 @@ func NewIPRateLimiter(perMinute, burst int) *IPRateLimiter {
 
 func (l *IPRateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !l.allow(clientIP(r)) {
+		if !l.allow(clientIP(r, l.trustProxy)) {
 			w.Header().Set("Retry-After", "60")
 			WriteError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests. Please slow down.")
 			return
@@ -127,7 +132,13 @@ func (l *IPRateLimiter) evictLoop() {
 	}
 }
 
-func clientIP(r *http.Request) string {
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		// The proxy puts the visitor's address first.
+		if first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ","); strings.TrimSpace(first) != "" {
+			return strings.TrimSpace(first)
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

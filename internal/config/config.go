@@ -18,6 +18,8 @@ type Config struct {
 	SMTP        SMTPConfig
 	// Per-IP limit for the OTP endpoints.
 	RateLimitPerMinute int
+	// TrustProxy: running behind a hosting proxy (TRUST_PROXY=true).
+	TrustProxy bool
 }
 
 type SMTPConfig struct {
@@ -64,6 +66,7 @@ func Load() (Config, error) {
 	if err != nil || cfg.RateLimitPerMinute < 1 {
 		return cfg, errors.New("RATE_LIMIT_PER_MINUTE must be a positive number")
 	}
+	cfg.TrustProxy = os.Getenv("TRUST_PROXY") == "true"
 
 	if secret := os.Getenv("OTP_SECRET"); secret != "" {
 		if len(secret) < 32 {
