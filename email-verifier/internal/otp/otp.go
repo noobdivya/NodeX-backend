@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"strings"
 	"sync"
@@ -103,6 +104,7 @@ func (s *Service) Send(ctx context.Context, rawEmail string) (token string, err 
 	}
 
 	if err := s.mailer.SendOTP(ctx, email, code, codeTTL); err != nil {
+		log.Printf("sending verification email failed: %v", err)
 		s.mu.Lock()
 		delete(s.lastSent, email) // let the user retry immediately
 		s.mu.Unlock()

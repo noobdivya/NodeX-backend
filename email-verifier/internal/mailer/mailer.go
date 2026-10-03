@@ -37,7 +37,14 @@ type smtpMailer struct {
 	cfg config.SMTPConfig
 }
 
-func (m smtpMailer) SendOTP(_ context.Context, to, code string, ttl time.Duration) error {
+// A blocked or unreachable mail server must fail fast instead of leaving
+// the sign-up request hanging.
+const (
+	dialTimeout = 10 * time.Second
+	sendTimeout = 30 * time.Second
+)
+
+func (m smtpMailer) SendOTP(ctx context.Context, to, code string, ttl time.Duration) error {
 	if strings.ContainsAny(to, "\r\n") {
 		return fmt.Errorf("invalid recipient")
 	}
@@ -59,14 +66,23 @@ func (m smtpMailer) SendOTP(_ context.Context, to, code string, ttl time.Duratio
 	}
 	from := envelopeAddress(m.cfg.From)
 
-	// Port 465 uses implicit TLS; everything else goes through SendMail,
-	// which upgrades with STARTTLS when the server offers it.
-	if m.cfg.Port != 465 {
-		return smtp.SendMail(addr, auth, from, []string{to}, []byte(msg))
+	tlsConfig := &tls.Config{ServerName: m.cfg.Host}
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+	var conn net.Conn
+	var err error
+	// Port 465 uses implicit TLS; other ports upgrade with STARTTLS.
+	if m.cfg.Port == 465 {
+		conn, err = (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(dialCtx, "tcp", addr)
+	} else {
+		conn, err = dialer.DialContext(dialCtx, "tcp", addr)
 	}
-
-	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: m.cfg.Host})
 	if err != nil {
+		return fmt.Errorf("connect to %s: %w", addr, err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(sendTimeout)); err != nil {
+		conn.Close()
 		return err
 	}
 	c, err := smtp.NewClient(conn, m.cfg.Host)
@@ -75,6 +91,13 @@ func (m smtpMailer) SendOTP(_ context.Context, to, code string, ttl time.Duratio
 		return err
 	}
 	defer c.Close()
+	if m.cfg.Port != 465 {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err := c.StartTLS(tlsConfig); err != nil {
+				return err
+			}
+		}
+	}
 	if auth != nil {
 		if err := c.Auth(auth); err != nil {
 			return err
