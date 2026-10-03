@@ -18,12 +18,12 @@ type Mailer interface {
 	SendOTP(ctx context.Context, to, code string, ttl time.Duration) error
 }
 
-// New picks how codes are sent: the Gmail API if configured, else SMTP,
+// New picks how codes are sent: Brevo's API if a key is set, else SMTP,
 // else (for local development) printing them to the log.
-func New(smtpCfg config.SMTPConfig, gmailCfg config.GmailConfig) Mailer {
+func New(smtpCfg config.SMTPConfig, brevoAPIKey string) Mailer {
 	switch {
-	case gmailCfg.Enabled():
-		return newGmailMailer(gmailCfg, smtpCfg.From)
+	case brevoAPIKey != "":
+		return newBrevoMailer(brevoAPIKey, smtpCfg.From)
 	case smtpCfg.Enabled():
 		return smtpMailer{cfg: smtpCfg}
 	default:
@@ -31,21 +31,26 @@ func New(smtpCfg config.SMTPConfig, gmailCfg config.GmailConfig) Mailer {
 	}
 }
 
+const otpSubject = "Your NodeX verification code"
+
+func otpBody(code string, ttl time.Duration) string {
+	return fmt.Sprintf(
+		"Your NodeX verification code is: %s\r\n\r\nIt expires in %d minutes. If you did not request this, you can ignore this email.\r\n",
+		code, int(ttl.Minutes()),
+	)
+}
+
 // otpMessage is the verification email, as an RFC 5322 message.
 func otpMessage(from, to, code string, ttl time.Duration) ([]byte, error) {
 	if strings.ContainsAny(to, "\r\n") || strings.ContainsAny(from, "\r\n") {
 		return nil, fmt.Errorf("invalid address")
 	}
-	body := fmt.Sprintf(
-		"Your NodeX verification code is: %s\r\n\r\nIt expires in %d minutes. If you did not request this, you can ignore this email.\r\n",
-		code, int(ttl.Minutes()),
-	)
 	return []byte("From: " + from + "\r\n" +
 		"To: " + to + "\r\n" +
-		"Subject: Your NodeX verification code\r\n" +
+		"Subject: " + otpSubject + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: text/plain; charset=UTF-8\r\n" +
-		"\r\n" + body), nil
+		"\r\n" + otpBody(code, ttl)), nil
 }
 
 // logMailer prints codes to stdout so the flow works locally without SMTP.

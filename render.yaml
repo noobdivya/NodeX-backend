@@ -36,15 +36,11 @@ services:
         value: "true"
       - key: OTP_SECRET
         generateValue: true
-      # Email: Render's free plan blocks SMTP, so codes go out through the
-      # Gmail API over HTTPS. Get the values with `go run ./cmd/gmail-auth`
-      # in email-verifier/ (see README). Asked for when the Blueprint is created:
-      - key: GMAIL_CLIENT_ID
+      # Email: Render's free plan blocks SMTP, so codes go out through Brevo's
+      # email API over HTTPS (see README). Asked for when the Blueprint is created:
+      - key: BREVO_API_KEY
         sync: false
-      - key: GMAIL_CLIENT_SECRET
-        sync: false
-      - key: GMAIL_REFRESH_TOKEN
-        sync: false
+      # Sender, e.g. NodeX <you@gmail.com>; must be a verified sender in Brevo.
       - key: SMTP_FROM
         sync: false
       # Your Vercel address, e.g. https://nodex.vercel.app (no trailing slash).

@@ -7,7 +7,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
 FROM alpine:3.22
-# CA certificates: needed to talk TLS to the SMTP server.
+# CA certificates: needed for TLS to the email service (Brevo or SMTP).
 RUN apk add --no-cache ca-certificates && adduser -D -H nodex
 USER nodex
 COPY --from=build /out/server /usr/local/bin/nodex-verifier

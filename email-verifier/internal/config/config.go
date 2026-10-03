@@ -16,7 +16,9 @@ type Config struct {
 	CORSOrigins []string
 	OTPSecret   []byte
 	SMTP        SMTPConfig
-	Gmail       GmailConfig
+	// BrevoAPIKey sends through Brevo's HTTPS email API instead of SMTP, for
+	// hosts that block outgoing mail ports (e.g. Render's free plan).
+	BrevoAPIKey string
 	// Per-IP limit for the OTP endpoints.
 	RateLimitPerMinute int
 	// TrustProxy: running behind a hosting proxy (TRUST_PROXY=true).
@@ -32,19 +34,6 @@ type SMTPConfig struct {
 }
 
 func (s SMTPConfig) Enabled() bool { return s.Host != "" }
-
-// GmailConfig sends through the Gmail API over HTTPS instead of SMTP, for
-// hosts that block outgoing mail ports. The refresh token comes from
-// `go run ./cmd/gmail-auth` and only allows sending mail.
-type GmailConfig struct {
-	ClientID     string
-	ClientSecret string
-	RefreshToken string
-}
-
-func (g GmailConfig) Enabled() bool {
-	return g.ClientID != "" && g.ClientSecret != "" && g.RefreshToken != ""
-}
 
 func (c Config) IsProduction() bool { return c.Env == "production" }
 
@@ -62,11 +51,7 @@ func Load() (Config, error) {
 			Password: os.Getenv("SMTP_PASSWORD"),
 			From:     getenv("SMTP_FROM", "NodeX <no-reply@nodex.local>"),
 		},
-		Gmail: GmailConfig{
-			ClientID:     os.Getenv("GMAIL_CLIENT_ID"),
-			ClientSecret: os.Getenv("GMAIL_CLIENT_SECRET"),
-			RefreshToken: os.Getenv("GMAIL_REFRESH_TOKEN"),
-		},
+		BrevoAPIKey: os.Getenv("BREVO_API_KEY"),
 	}
 
 	for _, o := range strings.Split(getenv("CORS_ORIGINS", "http://localhost:3000"), ",") {
@@ -104,8 +89,8 @@ func Load() (Config, error) {
 		log.Println("warning: OTP_SECRET not set, using a random per-process secret (development only)")
 	}
 
-	if cfg.IsProduction() && !cfg.SMTP.Enabled() && !cfg.Gmail.Enabled() {
-		return cfg, errors.New("email sending is required in production: set the GMAIL_* or SMTP_* settings")
+	if cfg.IsProduction() && !cfg.SMTP.Enabled() && cfg.BrevoAPIKey == "" {
+		return cfg, errors.New("email sending is required in production: set BREVO_API_KEY or the SMTP_* settings")
 	}
 
 	return cfg, nil
