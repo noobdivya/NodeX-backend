@@ -1,0 +1,4 @@
+node.key
+.env
+.env.*
+*.exe
